@@ -83,6 +83,8 @@ class MOTAccumulator(object):
 
     def reset(self):
         """Reset the accumulator to empty state."""
+        self.last_events = []
+        self.last_indices = []
 
         self._events = []
         self._indices = []
@@ -152,20 +154,22 @@ class MOTAccumulator(object):
 
         no = len(oids)
         nh = len(hids)
-        
+        _indices = []
+        _events = []
+
         if no * nh > 0:
             for i in range(no):
                 for j in range(nh):
-                    self._indices.append((frameid, next(eid)))
-                    self._events.append(['RAW', oids[i], hids[j], dists[i,j]])
+                    _indices.append((frameid, next(eid)))
+                    _events.append(['RAW', oids[i], hids[j], dists[i,j]])
         elif no == 0:
             for i in range(nh):
-                self._indices.append((frameid, next(eid)))
-                self._events.append(['RAW', np.nan, hids[i], np.nan])       
+                _indices.append((frameid, next(eid)))
+                _events.append(['RAW', np.nan, hids[i], np.nan])
         elif nh == 0:
             for i in range(no):
-                self._indices.append((frameid, next(eid)))
-                self._events.append(['RAW', oids[i], np.nan, np.nan])
+                _indices.append((frameid, next(eid)))
+                _events.append(['RAW', oids[i], np.nan, np.nan])
 
         if oids.size * hids.size > 0:    
             # 1. Try to re-establish tracks from previous correspondences
@@ -183,9 +187,9 @@ class MOTAccumulator(object):
                     oids[i] = ma.masked
                     hids[j] = ma.masked
                     self.m[oids.data[i]] = hids.data[j]
-                    
-                    self._indices.append((frameid, next(eid)))
-                    self._events.append(['MATCH', oids.data[i], hids.data[j], dists[i, j]])
+
+                    _indices.append((frameid, next(eid)))
+                    _events.append(['MATCH', oids.data[i], hids.data[j], dists[i, j]])
 
             # 2. Try to remaining objects/hypotheses
             dists[oids.mask, :] = np.nan
@@ -203,25 +207,31 @@ class MOTAccumulator(object):
                             self.m[o] != h and \
                             abs(frameid - self.last_occurrence[o]) <= self.max_switch_time
                 cat = 'SWITCH' if is_switch else 'MATCH'
-                self._indices.append((frameid, next(eid)))
-                self._events.append([cat, oids.data[i], hids.data[j], dists[i, j]])
+                _indices.append((frameid, next(eid)))
+                _events.append([cat, oids.data[i], hids.data[j], dists[i, j]])
                 oids[i] = ma.masked
                 hids[j] = ma.masked
                 self.m[o] = h
 
         # 3. All remaining objects are missed
         for o in oids[~oids.mask]:
-            self._indices.append((frameid, next(eid)))
-            self._events.append(['MISS', o, np.nan, np.nan])
+            _indices.append((frameid, next(eid)))
+            _events.append(['MISS', o, np.nan, np.nan])
         
         # 4. All remaining hypotheses are false alarms
         for h in hids[~hids.mask]:
-            self._indices.append((frameid, next(eid)))
-            self._events.append(['FP', np.nan, h, np.nan])
+            _indices.append((frameid, next(eid)))
+            _events.append(['FP', np.nan, h, np.nan])
 
         # 5. Update occurance state
         for o in oids.data:            
             self.last_occurrence[o] = frameid
+
+        self._indices.extend(_indices)
+        self._events.extend(_events)
+
+        self.last_indices = _indices
+        self.last_events = _events
 
         return frameid
 
@@ -236,6 +246,12 @@ class MOTAccumulator(object):
     def mot_events(self):
         df = self.events
         return df[df.Type != 'RAW']
+
+    @property
+    def last_mot_events(self):
+        df = MOTAccumulator.new_event_dataframe_with_data(self.last_indices, self.last_events)
+        return df[df.Type != 'RAW']
+
 
     @staticmethod
     def new_event_dataframe():
